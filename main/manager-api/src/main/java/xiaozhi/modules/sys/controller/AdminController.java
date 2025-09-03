@@ -1,5 +1,6 @@
 package xiaozhi.modules.sys.controller;
 
+import java.util.List;
 import java.util.Map;
 
 import org.apache.shiro.authz.annotation.RequiresPermissions;
@@ -17,6 +18,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.Parameters;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.page.PageData;
 import xiaozhi.common.utils.Result;
@@ -27,6 +29,7 @@ import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.sys.dto.AdminPageUserDTO;
 import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
+import xiaozhi.modules.sys.vo.ChatCountVO;
 
 /**
  * 管理员控制层
@@ -38,6 +41,7 @@ import xiaozhi.modules.sys.vo.AdminPageUserVO;
 @RestController
 @RequestMapping("/admin")
 @Tag(name = "Admin Management")
+@Slf4j
 public class AdminController {
     private final SysUserService sysUserService;
 
@@ -105,5 +109,26 @@ public class AdminController {
         ValidatorUtils.validateEntity(dto);
         PageData<UserShowDeviceListVO> page = deviceService.page(dto);
         return new Result<PageData<UserShowDeviceListVO>>().ok(page);
+    }
+
+    @GetMapping("/chat-count")
+    @Operation(summary = "get chat counts by date")
+    @RequiresPermissions("sys:role:superAdmin")
+    @Parameters({
+            @Parameter(name = "date", description = "date to query (YYYY-MM-DD)", required = true),
+            @Parameter(name = "minCount", description = "minimum chat count threshold", required = false),
+    })
+    public Result<List<ChatCountVO>> getChatCount(
+            @RequestParam String date,
+            @RequestParam(defaultValue = "0") Integer minCount) {
+        log.info("Getting chat count for date: {} with minCount: {}", date, minCount);
+        try {
+            List<ChatCountVO> chatCounts = sysUserService.getChatCount(date, minCount);
+            log.info("Returning {} chat count records", chatCounts != null ? chatCounts.size() : 0);
+            return new Result<List<ChatCountVO>>().ok(chatCounts);
+        } catch (Exception e) {
+            log.error("Error getting chat count for date: {} with minCount: {}", date, minCount, e);
+            return new Result<List<ChatCountVO>>().error("Failed to get chat count: " + e.getMessage());
+        }
     }
 }
