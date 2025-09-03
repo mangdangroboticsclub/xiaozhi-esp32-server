@@ -8,6 +8,10 @@
         <el-input placeholder=" Please enter phone number to search" v-model="searchPhone" class="search-input" clearable
           @keyup.enter.native="handleSearch" />
         <el-button class="btn-search" @click="handleSearch">Search</el-button>
+
+        <el-date-picker v-model="chatDate" type="date" placeholder="Select date"/>
+        <el-input v-model.number="minChatCount" placeholder="Min chat count" class="search-input" clearable />
+        <el-button type="primary" size="small" @click="fetchChatCounts">Get Chat Counts</el-button>
       </div>
     </div>
 
@@ -81,6 +85,18 @@
       </div>
     </div>
 
+    <!-- Chat Count Dialog -->
+    <el-dialog title="Chat Counts" :visible.sync="showChatCountDialog" width="640px">
+      <el-table :data="chatCounts" style="width: 100%">
+        <el-table-column prop="userId" label="User ID" width="120" align="center"></el-table-column>
+        <el-table-column prop="username" label="Username" align="center"></el-table-column>
+        <el-table-column prop="chatCount" label="Chat Count" width="140" align="center"></el-table-column>
+      </el-table>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="showChatCountDialog = false">Close</el-button>
+      </span>
+    </el-dialog>
+
     <view-password-dialog :visible.sync="showViewPassword" :password="currentPassword" />
     <el-footer>
       <version-footer />
@@ -107,6 +123,10 @@ export default {
       total: 0,
       isAllSelected: false,
       loading: false,
+      chatDate: null,
+      minChatCount: 0,
+      showChatCountDialog: false,
+      chatCounts: [],
     };
   },
   created() {
@@ -158,6 +178,43 @@ export default {
           }
         }
       );
+    },
+    fetchChatCounts() {
+      // require a date
+      if (!this.chatDate) {
+        this.$message.warning("Please select a date");
+        return;
+      }
+
+      // format date to YYYY-MM-DD (if Date object)
+      let dateStr = this.chatDate;
+      if (this.chatDate instanceof Date) {
+        dateStr = this.chatDate.toISOString().slice(0, 10);
+      }
+
+      const min = Number(this.minChatCount) || 0;
+
+      const loading = this.$loading({
+        lock: true,
+        text: "Loading...",
+        spinner: "el-icon-loading",
+        background: "rgba(0, 0, 0, 0.7)",
+      });
+
+      Api.admin.getChatCount(dateStr, min, ({ data }) => {
+        loading.close();
+        console.log("Chat count API response:", data); // Debug log
+        if (data && data.code === 0) {
+          // procedure returns rows directly
+          this.chatCounts = data.data || [];
+          this.showChatCountDialog = true;
+          if (this.chatCounts.length === 0) {
+            this.$message.info("No chat records found for the selected date and criteria");
+          }
+        } else {
+          this.$message.error(data.msg || "Failed to load chat counts");
+        }
+      });
     },
     handleSearch() {
       this.currentPage = 1;
