@@ -3,4 +3,32 @@
 
 <mapper namespace="xiaozhi.modules.sys.dao.SysUserDao">
 
+    <!-- Result map for chat count statistics -->
+    <resultMap id="chatCountResultMap" type="xiaozhi.modules.sys.vo.ChatCountVO">
+        <result column="userId" property="userId"/>
+        <result column="username" property="username"/>
+        <result column="chatCount" property="chatCount"/>
+    </resultMap>
+
+    <!-- Direct SQL query implementation (more reliable than stored procedure) -->
+    <select id="getChatCount" resultMap="chatCountResultMap">
+        SELECT su.id AS userId,
+               su.username,
+               COUNT(*) AS chatCount
+        FROM ai_agent_chat_history c
+        JOIN ai_device d ON c.mac_address = d.mac_address
+        JOIN sys_user su ON d.user_id = su.id
+        WHERE DATE(c.created_at) = #{date}
+        GROUP BY su.id, su.username
+        HAVING chatCount > #{minCount}
+        ORDER BY chatCount DESC
+    </select>
+
+    <!-- Alternative: Using CALLABLE statement type for stored procedure (if you prefer) -->
+    <!--
+    <select id="getChatCount" resultType="xiaozhi.modules.sys.vo.ChatCountVO" statementType="CALLABLE">
+        {CALL getChatCount(#{date}, #{minCount})}
+    </select>
+    -->
+
 </mapper>
