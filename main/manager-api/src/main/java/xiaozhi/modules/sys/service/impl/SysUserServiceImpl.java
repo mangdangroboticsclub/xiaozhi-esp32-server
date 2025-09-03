@@ -8,6 +8,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +35,7 @@ import xiaozhi.modules.sys.enums.SuperAdminEnum;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
+import xiaozhi.modules.sys.vo.ChatCountVO;
 
 /**
  * 系统用户
@@ -40,6 +43,8 @@ import xiaozhi.modules.sys.vo.AdminPageUserVO;
 @AllArgsConstructor
 @Service
 public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntity> implements SysUserService {
+    private static final Logger logger = LoggerFactory.getLogger(SysUserServiceImpl.class);
+    
     private final SysUserDao sysUserDao;
 
     private final DeviceService deviceService;
@@ -225,5 +230,24 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
             return true;
         }
         return false;
+    }
+
+    @Override
+    public List<ChatCountVO> getChatCount(String date, Integer minCount) {
+        logger.info("Getting chat count for date: {} with minCount: {}", date, minCount);
+        try {
+            List<ChatCountVO> result = sysUserDao.getChatCount(date, minCount);
+            logger.info("Chat count result: {} records found", result != null ? result.size() : 0);
+            if (result != null && !result.isEmpty()) {
+                for (ChatCountVO vo : result) {
+                    logger.debug("Chat count result: userId={}, username={}, count={}", 
+                            vo.getUserId(), vo.getUsername(), vo.getChatCount());
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            logger.error("Error getting chat count for date: {} with minCount: {}", date, minCount, e);
+            throw e;
+        }
     }
 }
