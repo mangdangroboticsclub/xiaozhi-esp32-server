@@ -10,6 +10,7 @@ import xiaozhi.modules.sys.dto.SysUserDTO;
 import xiaozhi.modules.sys.entity.SysUserEntity;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
 import xiaozhi.modules.sys.vo.ChatCountVO;
+import xiaozhi.modules.sys.vo.UserChatStatsVO;
 
 /**
  * 系统用户
@@ -84,4 +85,11 @@ public interface SysUserService extends BaseService<SysUserEntity> {
      * @return 聊天次数统计列表
      */
     List<ChatCountVO> getChatCount(String date, Integer minCount);
+
+    /**
+     * 获取所有用户的聊天统计信息（最近3个月和当月）
+     * 
+     * @return 用户聊天统计列表
+     */
+    List<UserChatStatsVO> getUserChatStats();
 }

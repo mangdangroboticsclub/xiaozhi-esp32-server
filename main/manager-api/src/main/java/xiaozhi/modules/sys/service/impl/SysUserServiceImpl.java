@@ -36,6 +36,7 @@ import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
 import xiaozhi.modules.sys.vo.ChatCountVO;
+import xiaozhi.modules.sys.vo.UserChatStatsVO;
 
 /**
  * 系统用户
@@ -247,6 +248,19 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
             return result;
         } catch (Exception e) {
             logger.error("Error getting chat count for date: {} with minCount: {}", date, minCount, e);
+            throw e;
+        }
+    }
+
+    @Override
+    public List<UserChatStatsVO> getUserChatStats() {
+        logger.info("Getting user chat statistics for all users");
+        try {
+            List<UserChatStatsVO> result = sysUserDao.getUserChatStats();
+            logger.info("User chat stats result: {} records found", result != null ? result.size() : 0);
+            return result;
+        } catch (Exception e) {
+            logger.error("Error getting user chat statistics", e);
             throw e;
         }
     }
