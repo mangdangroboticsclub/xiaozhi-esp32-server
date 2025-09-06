@@ -1,4 +1,5 @@
 import ElementUI from 'element-ui';
+import locale from 'element-ui/lib/locale/lang/en';
 import 'element-ui/lib/theme-chalk/index.css';
 import 'normalize.css/normalize.css'; // A modern alternative to CSS resets
 import Vue from 'vue';
@@ -8,7 +9,7 @@ import store from './store';
 import './styles/global.scss';
 import { register as registerServiceWorker } from './registerServiceWorker';
 
-Vue.use(ElementUI);
+Vue.use(ElementUI, { locale });
 
 Vue.config.productionTip = false
 

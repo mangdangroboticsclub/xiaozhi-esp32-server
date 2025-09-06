@@ -1,5 +1,7 @@
 package xiaozhi.modules.sys.service;
 
+import java.util.List;
+
 import xiaozhi.common.page.PageData;
 import xiaozhi.common.service.BaseService;
 import xiaozhi.modules.sys.dto.AdminPageUserDTO;
@@ -7,6 +9,7 @@ import xiaozhi.modules.sys.dto.PasswordDTO;
 import xiaozhi.modules.sys.dto.SysUserDTO;
 import xiaozhi.modules.sys.entity.SysUserEntity;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
+import xiaozhi.modules.sys.vo.ChatCountVO;
 
 /**
  * 系统用户
@@ -72,4 +75,13 @@ public interface SysUserService extends BaseService<SysUserEntity> {
      * @return 是否允许用户注册
      */
     boolean getAllowUserRegister();
+
+    /**
+     * 获取聊天次数统计
+     * 
+     * @param date 查询日期 (YYYY-MM-DD)
+     * @param minCount 最小聊天次数
+     * @return 聊天次数统计列表
+     */
+    List<ChatCountVO> getChatCount(String date, Integer minCount);
 }

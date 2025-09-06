@@ -161,6 +161,30 @@ export default {
                     this.sendWsServerAction(data, callback)
                 })
             }).send();
+    },
+    // 获取聊天次数统计
+    getChatCount(date, minCount, callback) {
+        const queryParams = new URLSearchParams({
+            date: date,
+            minCount: minCount
+        }).toString();
+
+        console.log("Calling getChatCount API with params:", { date, minCount }); // Debug log
+
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/chat-count?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                console.log("getChatCount API response:", res); // Debug log
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('failed to get chat count:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getChatCount(date, minCount, callback)
+                })
+            }).send()
     }
 
 }
