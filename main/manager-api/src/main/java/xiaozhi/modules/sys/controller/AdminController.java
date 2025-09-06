@@ -30,6 +30,7 @@ import xiaozhi.modules.sys.dto.AdminPageUserDTO;
 import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
 import xiaozhi.modules.sys.vo.ChatCountVO;
+import xiaozhi.modules.sys.vo.UserChatStatsVO;
 
 /**
  * 管理员控制层
@@ -129,6 +130,21 @@ public class AdminController {
         } catch (Exception e) {
             log.error("Error getting chat count for date: {} with minCount: {}", date, minCount, e);
             return new Result<List<ChatCountVO>>().error("Failed to get chat count: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/users/chat-stats")
+    @Operation(summary = "get chat statistics for all users")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<List<UserChatStatsVO>> getUserChatStats() {
+        log.info("Getting chat statistics for all users");
+        try {
+            List<UserChatStatsVO> chatStats = sysUserService.getUserChatStats();
+            log.info("Returning {} user chat stats records", chatStats != null ? chatStats.size() : 0);
+            return new Result<List<UserChatStatsVO>>().ok(chatStats);
+        } catch (Exception e) {
+            log.error("Error getting user chat statistics", e);
+            return new Result<List<UserChatStatsVO>>().error("Failed to get user chat statistics: " + e.getMessage());
         }
     }
 }
