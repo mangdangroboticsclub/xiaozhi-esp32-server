@@ -185,6 +185,25 @@ export default {
                     this.getChatCount(date, minCount, callback)
                 })
             }).send()
+    },
+    // 获取用户聊天统计信息
+    getUserChatStats(callback) {
+        console.log("Calling getUserChatStats API"); // Debug log
+
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/users/chat-stats`)
+            .method('GET')
+            .success((res) => {
+                console.log("getUserChatStats API response:", res); // Debug log
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('failed to get user chat stats:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getUserChatStats(callback)
+                })
+            }).send()
     }
 
 }
