@@ -12,6 +12,9 @@
         <el-date-picker v-model="chatDate" type="date" placeholder="Select date"/>
         <el-input v-model.number="minChatCount" placeholder="Min chat count" class="search-input" clearable />
         <el-button type="primary" size="small" @click="fetchChatCounts">Get Chat Counts</el-button>
+        <el-button type="success" size="small" @click="refreshChatStats" :loading="chatStatsLoading">
+          <i class="el-icon-refresh"></i> Refresh Chat Stats
+        </el-button>
       </div>
     </div>
 
@@ -31,6 +34,16 @@
               <el-table-column label="Phone Number" prop="mobile" align="center"></el-table-column>
               <el-table-column label="Device Amount" prop="deviceCount" align="center"></el-table-column>
               <el-table-column label="register date" prop="createDate" align="center"></el-table-column>
+              <el-table-column label="Last 3 Months" prop="last3MonthsCount" align="center" width="120">
+                <template slot-scope="scope">
+                  <span>{{ scope.row.last3MonthsCount || 0 }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="Current Month" prop="currentMonthCount" align="center" width="120">
+                <template slot-scope="scope">
+                  <span>{{ scope.row.currentMonthCount || 0 }}</span>
+                </template>
+              </el-table-column>
               <el-table-column label="Status" prop="status" align="center">
                 <template slot-scope="scope">
                   <el-tag v-if="scope.row.status === 1" type="success">Normal</el-tag>
@@ -127,10 +140,13 @@ export default {
       minChatCount: 0,
       showChatCountDialog: false,
       chatCounts: [],
+      chatStatsLoading: false,
+      userChatStats: [],
     };
   },
   created() {
     this.fetchUsers();
+    this.refreshChatStats();
   },
   computed: {
     pageCount() {
@@ -172,9 +188,13 @@ export default {
           if (data.code === 0) {
             this.userList = data.data.list.map(item => ({
               ...item,
-              selected: false
+              selected: false,
+              last3MonthsCount: 0,
+              currentMonthCount: 0
             }));
             this.total = data.data.total;
+            // Merge chat stats with user data
+            this.mergeChatStatsWithUsers();
           }
         }
       );
@@ -213,6 +233,39 @@ export default {
           }
         } else {
           this.$message.error(data.msg || "Failed to load chat counts");
+        }
+      });
+    },
+    refreshChatStats() {
+      this.chatStatsLoading = true;
+      Api.admin.getUserChatStats(({ data }) => {
+        this.chatStatsLoading = false;
+        console.log("User chat stats API response:", data); // Debug log
+        if (data && data.code === 0) {
+          this.userChatStats = data.data || [];
+          this.mergeChatStatsWithUsers();
+          this.$message.success("Chat statistics refreshed successfully");
+        } else {
+          this.$message.error(data.msg || "Failed to load chat statistics");
+        }
+      });
+    },
+    mergeChatStatsWithUsers() {
+      // Create a map of user chat stats for quick lookup
+      const statsMap = {};
+      this.userChatStats.forEach(stat => {
+        statsMap[stat.userId] = stat;
+      });
+
+      // Update user list with chat stats
+      this.userList.forEach(user => {
+        const stats = statsMap[user.userid];
+        if (stats) {
+          user.last3MonthsCount = stats.last3MonthsCount || 0;
+          user.currentMonthCount = stats.currentMonthCount || 0;
+        } else {
+          user.last3MonthsCount = 0;
+          user.currentMonthCount = 0;
         }
       });
     },
