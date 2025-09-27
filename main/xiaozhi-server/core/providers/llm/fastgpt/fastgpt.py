@@ -1,73 +1,188 @@
+import os
 import json
-from config.logger import setup_logging
-import requests
-from core.providers.llm.base import LLMProviderBase
-from core.utils.util import check_model_key
+import uuid
+from types import SimpleNamespace
+from typing import Any, Dict, List, Generator, Tuple, Optional
 
+import vertexai
+from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration, Part, Content
+
+from core.providers.llm.base import LLMProviderBase
+from config.logger import setup_logging
+
+log = setup_logging()
 TAG = __name__
-logger = setup_logging()
+
+from core.utils.emotion_manager import emotion_manager
+# Generate dynamic emotion list from configuration
+emotion_descriptions = emotion_manager.get_emotion_descriptions()
+emotion_list = "\n".join([f"- {emotion}: {desc}" for emotion, desc in emotion_descriptions.items()])
+
+emotional_prompt = f"""
+    请使用中文回答所有问题和进行所有对话。
+
+    情感表达
+
+    作为你的角色，你应该根据上下文表达情感。在每个回应之前，为你的角色选择一个合适的情感来表现。像"elf"和"snowman"这样的"特殊"情感用于当话题围绕它们时。
+
+    可用的机器人情感：
+    {emotion_list}
+    - {emotion_manager.default_emotion}: 默认/后备情感
+
+    重要提示：每个回应都要以[EMOTION:emotion_name]开始，其中emotion_name是上面列出的情感之一。例如：[EMOTION:neutral] 或 [EMOTION:bell] 或 [EMOTION:star]
+
+    请记住：始终使用中文进行回答和对话。
+"""
 
 
 class LLMProvider(LLMProviderBase):
-    def __init__(self, config):
-        self.api_key = config["api_key"]
-        self.base_url = config.get("base_url")
-        self.detail = config.get("detail", False)
-        self.variables = config.get("variables", {})
-        model_key_msg = check_model_key("FastGPTLLM", self.api_key)
-        if model_key_msg:
-            logger.bind(tag=TAG).error(model_key_msg)
-
-    def response(self, session_id, dialogue, **kwargs):
+    def __init__(self, cfg: Dict[str, Any]):
+        log.bind(tag=TAG).info(f"Initializing Gemini Vertex AI provider with config: {cfg}")
         try:
-            # 取最后一条用户消息
-            last_msg = next(m for m in reversed(dialogue) if m["role"] == "user")
+            self.model_name = cfg.get("model_name", "gemini-2.0-flash")
 
-            # 发起流式请求
-            with requests.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={
-                    "stream": True,
-                    "chatId": session_id,
-                    "detail": self.detail,
-                    "variables": self.variables,
-                    "messages": [{"role": "user", "content": last_msg["content"]}],
-                },
-                stream=True,
-            ) as r:
-                for line in r.iter_lines():
-                    if line:
-                        try:
-                            if line.startswith(b"data: "):
-                                if line[6:].decode("utf-8") == "[DONE]":
-                                    break
+            # Ensure GOOGLE_APPLICATION_CREDENTIALS is set
+            credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            if not credentials_path or not os.path.exists(credentials_path):
+                raise KeyError("GOOGLE_APPLICATION_CREDENTIALS environment variable is not set or points to a non-existent file.")
+        except KeyError as e:
+            log.bind(tag=TAG).error(f"Configuration missing for Vertex AI. Required key not found: {e}. Please set the GOOGLE_APPLICATION_CREDENTIALS environment variable.")
+            raise e
 
-                                data = json.loads(line[6:])
-                                if "choices" in data and len(data["choices"]) > 0:
-                                    delta = data["choices"][0].get("delta", {})
-                                    if (
-                                        delta
-                                        and "content" in delta
-                                        and delta["content"] is not None
-                                    ):
-                                        content = delta["content"]
-                                        if "<think>" in content:
-                                            continue
-                                        if "</think>" in content:
-                                            continue
-                                        yield content
+        vertexai.init()
+        self.model = GenerativeModel(self.model_name)
+        self.chats: Dict[str, Any] = {}
 
-                        except json.JSONDecodeError as e:
-                            continue
-                        except Exception as e:
-                            continue
+        self.gen_cfg = {
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "top_k": 40,
+            "max_output_tokens": 2048,
+        }
 
-        except Exception as e:
-            logger.bind(tag=TAG).error(f"Error in response generation: {e}")
-            yield "【服务响应异常】"
+    @staticmethod
+    def _build_tools(funcs: List[Dict[str, Any]] | None):
+        if not funcs:
+            return None
+        return [
+            Tool(
+                function_declarations=[
+                    FunctionDeclaration(
+                        name=f["function"]["name"],
+                        description=f["function"]["description"],
+                        parameters=f["function"]["parameters"],
+                    )
+                    for f in funcs
+                ]
+            )
+        ]
+
+    # Gemini documentation mentions that there is no need to maintain session-id, directly spliced together with dialogue
+    def response(self, session_id, dialogue, **kwargs):
+        yield from self._generate(session_id, dialogue, None)
 
     def response_with_functions(self, session_id, dialogue, functions=None):
-        logger.bind(tag=TAG).error(
-            f"fastgpt暂未实现完整的工具调用（function call），建议使用其他意图识别"
-        )
+        yield from self._generate(session_id, dialogue, self._build_tools(functions))
+
+    def _generate(self, session_id, dialogue, tools):
+        chat = self.chats.get(session_id)
+        
+        # If no chat session exists, create a new one
+        if not chat:
+            role_map = {"assistant": "model", "user": "user"}
+            history: list[Content] = []
+            system_instruction = None
+
+            if dialogue and dialogue[0].get("role") == "system":
+                system_instruction = dialogue[0].get("content")
+                system_instruction = emotional_prompt + system_instruction
+                dialogue = dialogue[1:]
+
+            model = GenerativeModel(self.model_name, system_instruction=system_instruction)
+            log.bind(tag=TAG).info(f"Creating new chat session for {session_id} with model {self.model_name} and system instruction: {system_instruction}")
+
+            for m in dialogue:
+                r = m["role"]
+                
+                if r == "assistant" and "tool_calls" in m:
+                    tc = m["tool_calls"][0]
+                    history.append(Content(role="model", parts=[Part.from_dict({
+                        'function_call': {
+                            'name': tc['function']['name'],
+                            'args': json.loads(tc['function']['arguments'])
+                        }
+                    })]))
+                    continue
+
+                if r == "tool":
+                    history.append(Content(role="function", parts=[Part.from_dict({
+                        'function_response': {
+                            'name': m['name'],
+                            'response': {'content': m['content']}
+                        }
+                    })]))
+                    continue
+
+                mapped_role = role_map.get(r)
+                if mapped_role:
+                    content_text = str(m.get("content", ""))
+                    if content_text:
+                        if history and history[-1].role == mapped_role:
+                            history[-1].parts.append(Part.from_text(content_text))
+                        else:
+                            history.append(Content(role=mapped_role, parts=[Part.from_text(content_text)]))
+
+            chat = model.start_chat(history=history)
+            self.chats[session_id] = chat
+
+        # The last message in the dialogue is the one to send
+        latest_message = dialogue[-1] if dialogue else None
+        
+        if not latest_message or not latest_message.get("content"):
+            # If there's no content to send, we can't proceed
+            return
+
+        log.bind(tag=TAG).info(f"Sending request to Vertex AI for session {session_id}")
+        try:
+            stream = chat.send_message(
+                content=latest_message["content"],
+                generation_config=self.gen_cfg,
+                tools=tools,
+                stream=True,
+            )
+            log.bind(tag=TAG).info("Successfully sent request to Vertex AI, streaming response.")
+        except Exception as e:
+            log.bind(tag=TAG).error(f"Error calling Vertex AI: {e}", exc_info=True)
+            raise
+
+        try:
+            for chunk in stream:
+                log.bind(tag=TAG).debug(f"Received chunk from Vertex AI: {chunk}")
+                if not chunk.candidates:
+                    continue
+                
+                part = chunk.candidates[0].content.parts[0]
+                # a) Function call - usually the last part is the function call
+                if part.function_call:
+                    fc = part.function_call
+                    yield None, [
+                        SimpleNamespace(
+                            id=uuid.uuid4().hex,
+                            type="function",
+                            function=SimpleNamespace(
+                                name=fc.name,
+                                arguments=json.dumps(
+                                    dict(fc.args), ensure_ascii=False
+                                ),
+                            ),
+                        )
+                    ]
+                    return
+                # b) Normal text
+                if part.text:
+                    yield part.text if tools is None else (part.text, None)
+        except Exception as e:
+            log.bind(tag=TAG).error(f"Error processing stream from Vertex AI: {e}", exc_info=True)
+        finally:
+            if tools is not None:
+                yield None, None  # function‑mode ends, returns dummy package
