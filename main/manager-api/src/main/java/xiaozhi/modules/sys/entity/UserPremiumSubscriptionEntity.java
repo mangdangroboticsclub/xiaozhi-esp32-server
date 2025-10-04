@@ -40,7 +40,7 @@ public class UserPremiumSubscriptionEntity extends BaseEntity {
     private String paymentCurrency;
     
     /**
-     * 支付方式：STRIPE, PAYPAL, WECHAT, ALIPAY
+     * 支付方式：SHOPIFY, STRIPE, PAYPAL, WECHAT, ALIPAY
      */
     private String paymentMethod;
     
@@ -70,26 +70,8 @@ public class UserPremiumSubscriptionEntity extends BaseEntity {
     private Integer autoRenew;
     
     /**
-     * 创建时间
-     */
-    @TableField(fill = FieldFill.INSERT)
-    private Date createdDate;
-    
-    /**
      * 更新时间
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private Date updatedDate;
-    
-    /**
-     * 创建者
-     */
-    @TableField(fill = FieldFill.INSERT)
-    private Long creator;
-    
-    /**
-     * 更新者
-     */
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private Long updater;
+    private Date updateDate;
 }

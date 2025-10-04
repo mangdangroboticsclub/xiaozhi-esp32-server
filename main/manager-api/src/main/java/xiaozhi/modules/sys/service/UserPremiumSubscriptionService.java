@@ -51,4 +51,14 @@ public interface UserPremiumSubscriptionService extends BaseService<UserPremiumS
      * 根据支付交易ID验证订阅
      */
     boolean validateSubscriptionByTransactionId(String transactionId);
+    
+    /**
+     * 根据交易ID查找订阅记录
+     */
+    UserPremiumSubscriptionDTO findByTransactionId(String transactionId);
+    
+    /**
+     * 更新订阅记录
+     */
+    void updateSubscription(UserPremiumSubscriptionDTO dto);
 }

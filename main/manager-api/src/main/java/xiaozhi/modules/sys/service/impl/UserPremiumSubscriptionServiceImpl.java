@@ -37,7 +37,7 @@ public class UserPremiumSubscriptionServiceImpl extends BaseServiceImpl<UserPrem
     @Override
     public PageData<UserPremiumSubscriptionDTO> page(Map<String, Object> params) {
         IPage<UserPremiumSubscriptionEntity> page = baseDao.selectPage(
-            getPage(params, "created_date", false),
+            getPage(params, "create_date", false),
             getWrapper(params)
         );
         return getPageData(page, UserPremiumSubscriptionDTO.class);
@@ -54,12 +54,10 @@ public class UserPremiumSubscriptionServiceImpl extends BaseServiceImpl<UserPrem
     public void createSubscription(UserPremiumSubscriptionDTO dto) {
         UserPremiumSubscriptionEntity entity = ConvertUtils.sourceToTarget(dto, UserPremiumSubscriptionEntity.class);
         
-        // 设置创建时间
-        if (entity.getCreatedDate() == null) {
-            entity.setCreatedDate(new Date());
-        }
-        if (entity.getUpdatedDate() == null) {
-            entity.setUpdatedDate(new Date());
+        // BaseEntity will handle createDate and creator automatically via @TableField(fill = FieldFill.INSERT)
+        // Just set updateDate if needed
+        if (entity.getUpdateDate() == null) {
+            entity.setUpdateDate(new Date());
         }
         
         // 保存订阅记录
@@ -79,7 +77,7 @@ public class UserPremiumSubscriptionServiceImpl extends BaseServiceImpl<UserPrem
         UserPremiumSubscriptionEntity entity = selectById(subscriptionId);
         if (entity != null) {
             entity.setStatus(status);
-            entity.setUpdatedDate(new Date());
+            entity.setUpdateDate(new Date());
             updateById(entity);
             
             // 更新用户高级状态
@@ -179,6 +177,35 @@ public class UserPremiumSubscriptionServiceImpl extends BaseServiceImpl<UserPrem
         } catch (Exception e) {
             logger.error("Error validating subscription by transaction ID {}: {}", transactionId, e.getMessage(), e);
             return false;
+        }
+    }
+    
+    @Override
+    public UserPremiumSubscriptionDTO findByTransactionId(String transactionId) {
+        try {
+            UserPremiumSubscriptionEntity entity = baseDao.getSubscriptionByTransactionId(transactionId);
+            return ConvertUtils.sourceToTarget(entity, UserPremiumSubscriptionDTO.class);
+        } catch (Exception e) {
+            logger.error("Error finding subscription by transaction ID {}: {}", transactionId, e.getMessage(), e);
+            return null;
+        }
+    }
+    
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateSubscription(UserPremiumSubscriptionDTO dto) {
+        try {
+            UserPremiumSubscriptionEntity entity = ConvertUtils.sourceToTarget(dto, UserPremiumSubscriptionEntity.class);
+            entity.setUpdateDate(new Date());
+            updateById(entity);
+            
+            // Update user premium status after subscription change
+            checkAndUpdateUserPremiumStatus(dto.getUserId());
+            
+            logger.info("Updated subscription {} for user {}", entity.getId(), entity.getUserId());
+        } catch (Exception e) {
+            logger.error("Error updating subscription for user {}: {}", dto.getUserId(), e.getMessage(), e);
+            throw e;
         }
     }
     

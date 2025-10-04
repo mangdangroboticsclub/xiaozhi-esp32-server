@@ -36,7 +36,7 @@ public class UserPremiumSubscriptionDTO implements Serializable {
     @Schema(description = "Payment currency")
     private String paymentCurrency = "USD";
     
-    @Schema(description = "Payment method: STRIPE, PAYPAL, WECHAT, ALIPAY")
+    @Schema(description = "Payment method: SHOPIFY, STRIPE, PAYPAL, WECHAT, ALIPAY")
     private String paymentMethod;
     
     @Schema(description = "Payment transaction ID")
@@ -56,11 +56,14 @@ public class UserPremiumSubscriptionDTO implements Serializable {
     @Schema(description = "Auto renewal: 0=no, 1=yes")
     private Integer autoRenew = 0;
     
+    @Schema(description = "Creator ID")
+    private Long creator;
+    
     @Schema(description = "Creation date")
     @JsonFormat(pattern = DateUtils.DATE_TIME_PATTERN)
-    private Date createdDate;
+    private Date createDate;
     
     @Schema(description = "Update date")
     @JsonFormat(pattern = DateUtils.DATE_TIME_PATTERN)
-    private Date updatedDate;
+    private Date updateDate;
 }
