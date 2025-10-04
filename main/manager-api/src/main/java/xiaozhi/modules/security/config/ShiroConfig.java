@@ -85,6 +85,8 @@ public class ShiroConfig {
         filterMap.put("/user/pub-config", "anon");
         filterMap.put("/user/register", "anon");
         filterMap.put("/user/retrieve-password", "anon");
+        // Only webhook endpoints should be accessible without authentication for external services like Shopify
+        filterMap.put("/admin/payment/webhook/**", "anon");
         // 将config路径使用server服务过滤器
         filterMap.put("/config/**", "server");
         filterMap.put("/agent/chat-history/report", "server");
