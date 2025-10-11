@@ -428,38 +428,38 @@ ozhi/admin/premium/is-premium/1960603563958550529"(base) haris@xiaozhitest:~/xia
 
 iaozhi/admin/payment/webhook/shopify \
   -H "Conte(base) haris@xiaozhitest:~/xiaozhi-esp32-server$ curl -X POST http://localhost:8002/xiaozhi/admin/payment/webhook/shopify \
->   -H "Content-Type: application/json" \
->   -H "X-Shopify-Hmac-Sha256: test-signature" \
->   -d '{
->     "id": 123456792,
->     "total_price": "29.99",
->     "currency": "USD",
->     "financial_status": "refunded",
->     "customer": {
->       "id": 1960603563958550529,
->       "email": "test@example.com"
->     },
->     "line_items": [
->       {
->         "product_id": 1,
->         "title": "Monthly Premium Subscription",
->         "quantity": 1,
->         "price": "29.99"
->       }
->     ],
->     "refunds": [
->       {
->         "id": "refund_123",
->         "amount": "29.99",
->         "currency": "USD",
->         "reason": "requested_by_customer"
->       }
->     ],
->     "note_attributes": [
->       {
->         "name": "user_id",
->         "value": "1960603563958550529"
->       }
->     ]
->   }'
+   -H "Content-Type: application/json" \
+   -H "X-Shopify-Hmac-Sha256: 4b0915de9e5123f1daae5fa92bf52b943665d354df7a46342189a75bc60e269e" \
+   -d '{
+     "id": 123456792,
+     "total_price": "29.99",
+     "currency": "USD",
+     "financial_status": "refunded",
+     "customer": {
+       "id": 1960603563958550529,
+       "email": "test@example.com"
+     },
+     "line_items": [
+       {
+         "product_id": 1,
+         "title": "Monthly Premium Subscription",
+         "quantity": 1,
+         "price": "29.99"
+       }
+     ],
+     "refunds": [
+       {
+         "id": "refund_123",
+         "amount": "29.99",
+         "currency": "USD",
+         "reason": "requested_by_customer"
+       }
+     ],
+     "note_attributes": [
+       {
+         "name": "user_id",
+         "value": "1960603563958550529"
+       }
+     ]
+   }'
 {"code":401,"msg":"Unauthorized","data":null}(base)
