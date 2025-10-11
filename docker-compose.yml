@@ -41,6 +41,7 @@ services:
       - SPRING_DATASOURCE_DRUID_PASSWORD=123456
       - SPRING_DATA_REDIS_HOST=xiaozhi-esp32-server-redis
       - SPRING_DATA_REDIS_PORT=6379
+      - SHOPIFY_WEBHOOK_SECRET=${SHOPIFY_WEBHOOK_SECRET}
     volumes:
       - ./main/xiaozhi-server/uploadfile:/uploadfile
 

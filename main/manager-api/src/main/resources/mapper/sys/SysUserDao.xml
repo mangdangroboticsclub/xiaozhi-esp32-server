@@ -10,6 +10,13 @@
         <result column="chatCount" property="chatCount"/>
     </resultMap>
 
+    <!-- Result map for user chat statistics -->
+    <resultMap id="userChatStatsResultMap" type="xiaozhi.modules.sys.vo.UserChatStatsVO">
+        <result column="userId" property="userId"/>
+        <result column="last3MonthsCount" property="last3MonthsCount"/>
+        <result column="currentMonthCount" property="currentMonthCount"/>
+    </resultMap>
+
     <!-- Direct SQL query implementation (more reliable than stored procedure) -->
     <select id="getChatCount" resultMap="chatCountResultMap">
         SELECT su.id AS userId,
@@ -22,6 +29,30 @@
         GROUP BY su.id, su.username
         HAVING chatCount > #{minCount}
         ORDER BY chatCount DESC
+    </select>
+
+    <!-- Get chat statistics for all users (last 3 months and current month) -->
+    <select id="getUserChatStats" resultMap="userChatStatsResultMap">
+        SELECT 
+            su.id AS userId,
+            COALESCE(last3months.chat_count, 0) AS last3MonthsCount,
+            COALESCE(currentmonth.chat_count, 0) AS currentMonthCount
+        FROM sys_user su
+        LEFT JOIN (
+            SELECT d.user_id, COUNT(*) as chat_count
+            FROM ai_agent_chat_history c
+            JOIN ai_device d ON c.mac_address = d.mac_address
+            WHERE c.created_at >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+            GROUP BY d.user_id
+        ) last3months ON su.id = last3months.user_id
+        LEFT JOIN (
+            SELECT d.user_id, COUNT(*) as chat_count
+            FROM ai_agent_chat_history c
+            JOIN ai_device d ON c.mac_address = d.mac_address
+            WHERE c.created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+            GROUP BY d.user_id
+        ) currentmonth ON su.id = currentmonth.user_id
+        ORDER BY su.id
     </select>
 
     <!-- Alternative: Using CALLABLE statement type for stored procedure (if you prefer) -->
