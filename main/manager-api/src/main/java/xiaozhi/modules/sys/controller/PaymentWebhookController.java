@@ -2,9 +2,12 @@ package xiaozhi.modules.sys.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import xiaozhi.common.utils.Result;
 import xiaozhi.common.page.PageData;
@@ -25,25 +28,35 @@ import java.util.*;
 @RestController
 @RequestMapping("/admin/payment")
 @Tag(name = "Shopify Payment Webhook Management")
-@AllArgsConstructor
 @Slf4j
 public class PaymentWebhookController {
     
-    private final UserPremiumSubscriptionService premiumSubscriptionService;
-    private final SysUserService sysUserService;
+    @Autowired
+    private UserPremiumSubscriptionService premiumSubscriptionService;
+    
+    @Autowired
+    private SysUserService sysUserService;
+    
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    
+    @Value("${shopify.webhook.secret:}")
+    private String shopifyWebhookSecret;
     
     @PostMapping("webhook/shopify")
     @Operation(summary = "Handle Shopify webhook notifications")
-    public Result<String> handleShopifyWebhook(@RequestBody Map<String, Object> payload,
-                                               @RequestHeader("X-Shopify-Hmac-Sha256") String signature) {
+    public Result<String> handleShopifyWebhook(@RequestBody String rawPayload,
+                                               @RequestHeader(value = "X-Shopify-Hmac-Sha256", required = false) String signature) {
         try {
-            log.info("Received Shopify webhook: {}", payload.get("id"));
-            
-            // Verify webhook signature (implement signature verification as needed)
-            if (!verifyShopifySignature(payload, signature)) {
+            // Verify webhook signature using raw payload
+            if (!verifyShopifySignature(rawPayload, signature)) {
                 log.warn("Invalid Shopify webhook signature");
                 return new Result<String>().error("Invalid signature");
             }
+            
+            // Parse payload into Map for existing logic
+            Map<String, Object> payload = objectMapper.readValue(rawPayload, new TypeReference<Map<String, Object>>() {});
+            
+            log.info("Received Shopify webhook: {}", payload.get("id"));
             
             // Check if this is a successful order
             String financialStatus = (String) payload.get("financial_status");
@@ -521,22 +534,35 @@ public class PaymentWebhookController {
     
     /**
      * Verify Shopify webhook signature using HMAC-SHA256
-     * @param payload The webhook payload
+     * @param rawPayload The raw webhook payload string
      * @param signature The HMAC signature from Shopify
      * @return true if signature is valid
      */
-    private boolean verifyShopifySignature(Map<String, Object> payload, String signature) {
+    private boolean verifyShopifySignature(String rawPayload, String signature) {
         try {
-            // TODO: Get webhook secret from configuration/environment
             String webhookSecret = getShopifyWebhookSecret();
+            
+            log.info("=== Shopify Signature Verification ===");
+            log.info("Webhook secret configured: {}", webhookSecret != null && !webhookSecret.isEmpty());
+            log.info("Secret value (first 10 chars): {}", webhookSecret != null ? webhookSecret.substring(0, Math.min(10, webhookSecret.length())) + "..." : "null");
+            log.info("Received signature: {}", signature);
+            log.info("Raw payload length: {}", rawPayload != null ? rawPayload.length() : 0);
+            log.info("Raw payload (first 100 chars): {}", rawPayload != null && rawPayload.length() > 0 ? rawPayload.substring(0, Math.min(100, rawPayload.length())) : "empty");
             
             if (webhookSecret == null || webhookSecret.isEmpty()) {
                 log.warn("Shopify webhook secret not configured - skipping signature verification");
                 return true; // Allow in development, but log warning
             }
             
-            // Calculate HMAC-SHA256 signature
-            String calculatedSignature = calculateHmacSha256(payload, webhookSecret);
+            if (signature == null || signature.isEmpty()) {
+                log.warn("Missing X-Shopify-Hmac-Sha256 header");
+                return false;
+            }
+            
+            // Calculate HMAC-SHA256 signature using raw payload
+            String calculatedSignature = calculateHmacSha256(rawPayload, webhookSecret);
+            
+            log.info("Calculated signature: {}", calculatedSignature);
             
             // Compare signatures (use constant-time comparison to prevent timing attacks)
             boolean isValid = constantTimeEquals(signature, calculatedSignature);
@@ -544,7 +570,7 @@ public class PaymentWebhookController {
             if (!isValid) {
                 log.error("Invalid Shopify webhook signature. Expected: {}, Got: {}", calculatedSignature, signature);
             } else {
-                log.debug("Shopify webhook signature verified successfully");
+                log.info("Shopify webhook signature verified successfully");
             }
             
             return isValid;
@@ -556,23 +582,20 @@ public class PaymentWebhookController {
     
     /**
      * Get Shopify webhook secret from configuration
-     * In production, this should come from environment variables or secure configuration
+     * Priority: application property -> environment variable
      */
     private String getShopifyWebhookSecret() {
-        // TODO: Implement configuration retrieval
-        // return System.getenv("SHOPIFY_WEBHOOK_SECRET");
-        // or from application.yml/properties
-        return null; // Currently not configured
+        if (shopifyWebhookSecret != null && !shopifyWebhookSecret.isEmpty()) {
+            return shopifyWebhookSecret;
+        }
+        return System.getenv("SHOPIFY_WEBHOOK_SECRET");
     }
     
     /**
      * Calculate HMAC-SHA256 signature for webhook verification
      */
-    private String calculateHmacSha256(Map<String, Object> payload, String secret) {
+    private String calculateHmacSha256(String rawPayload, String secret) {
         try {
-            // Convert payload to raw JSON string (order matters!)
-            String rawPayload = convertToRawJson(payload);
-            
             javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
             javax.crypto.spec.SecretKeySpec secretKeySpec = new javax.crypto.spec.SecretKeySpec(
                 secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256");
@@ -583,21 +606,6 @@ public class PaymentWebhookController {
         } catch (Exception e) {
             log.error("Error calculating HMAC-SHA256: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to calculate webhook signature", e);
-        }
-    }
-    
-    /**
-     * Convert payload back to raw JSON string for signature verification
-     * Note: This is simplified - in production you'd need the exact raw request body
-     */
-    private String convertToRawJson(Map<String, Object> payload) {
-        // TODO: In production, capture and use the raw request body
-        // For now, use a basic JSON conversion
-        try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(payload);
-        } catch (Exception e) {
-            log.error("Error converting payload to JSON: {}", e.getMessage(), e);
-            return "";
         }
     }
     
