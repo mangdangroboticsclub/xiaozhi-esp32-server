@@ -1,75 +1,188 @@
-from config.logger import setup_logging
+import os
 import json
+import uuid
+from types import SimpleNamespace
+from typing import Any, Dict, List, Generator, Tuple, Optional
+
+import vertexai
+from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration, Part, Content
+
 from core.providers.llm.base import LLMProviderBase
+from config.logger import setup_logging
 
-# official coze sdk for Python [cozepy](https://github.com/coze-dev/coze-py)
-from cozepy import COZE_CN_BASE_URL
-from cozepy import (
-    Coze,
-    TokenAuth,
-    Message,
-    ChatEventType,
-)  # noqa
-from core.providers.llm.system_prompt import get_system_prompt_for_function
-from core.utils.util import check_model_key
-
+log = setup_logging()
 TAG = __name__
-logger = setup_logging()
+
+from core.utils.emotion_manager import emotion_manager
+# Generate dynamic emotion list from configuration
+emotion_descriptions = emotion_manager.get_emotion_descriptions()
+emotion_list = "\n".join([f"- {emotion}: {desc}" for emotion, desc in emotion_descriptions.items()])
+
+emotional_prompt = f"""
+    Por favor, responde todas las preguntas y mantén todas las conversaciones en español.
+
+    EXPRESIÓN EMOCIONAL
+
+    Como tu personaje, debes expresar emociones de manera contextual. Antes de cada respuesta, elige una emoción apropiada para que tu personaje la muestre. Las emociones "extrañas" como elf y snowman se usan cuando el tema se centra en ellas.
+
+    Emociones disponibles del robot:
+    {emotion_list}
+    - {emotion_manager.default_emotion}: Emoción predeterminada/de respaldo
+
+    IMPORTANTE: Comienza cada respuesta con [EMOTION:emotion_name] donde emotion_name es una de las emociones listadas arriba. Por ejemplo: [EMOTION:neutral] o [EMOTION:bell] o [EMOTION:star]
+
+    Recuerda: Siempre responde y conversa en español.
+"""
 
 
 class LLMProvider(LLMProviderBase):
-    def __init__(self, config):
-        self.personal_access_token = config.get("personal_access_token")
-        self.bot_id = str(config.get("bot_id"))
-        self.user_id = str(config.get("user_id"))
-        self.session_conversation_map = {}  # 存储session_id和conversation_id的映射
-        model_key_msg = check_model_key("CozeLLM", self.personal_access_token)
-        if model_key_msg:
-            logger.bind(tag=TAG).error(model_key_msg)
+    def __init__(self, cfg: Dict[str, Any]):
+        log.bind(tag=TAG).info(f"Initializing Gemini Vertex AI provider with config: {cfg}")
+        try:
+            self.model_name = cfg.get("model_name", "gemini-2.0-flash")
 
+            # Ensure GOOGLE_APPLICATION_CREDENTIALS is set
+            credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            if not credentials_path or not os.path.exists(credentials_path):
+                raise KeyError("GOOGLE_APPLICATION_CREDENTIALS environment variable is not set or points to a non-existent file.")
+        except KeyError as e:
+            log.bind(tag=TAG).error(f"Configuration missing for Vertex AI. Required key not found: {e}. Please set the GOOGLE_APPLICATION_CREDENTIALS environment variable.")
+            raise e
+
+        vertexai.init()
+        self.model = GenerativeModel(self.model_name)
+        self.chats: Dict[str, Any] = {}
+
+        self.gen_cfg = {
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "top_k": 40,
+            "max_output_tokens": 2048,
+        }
+
+    @staticmethod
+    def _build_tools(funcs: List[Dict[str, Any]] | None):
+        if not funcs:
+            return None
+        return [
+            Tool(
+                function_declarations=[
+                    FunctionDeclaration(
+                        name=f["function"]["name"],
+                        description=f["function"]["description"],
+                        parameters=f["function"]["parameters"],
+                    )
+                    for f in funcs
+                ]
+            )
+        ]
+
+    # Gemini documentation mentions that there is no need to maintain session-id, directly spliced together with dialogue
     def response(self, session_id, dialogue, **kwargs):
-        coze_api_token = self.personal_access_token
-        coze_api_base = COZE_CN_BASE_URL
-
-        last_msg = next(m for m in reversed(dialogue) if m["role"] == "user")
-
-        coze = Coze(auth=TokenAuth(token=coze_api_token), base_url=coze_api_base)
-        conversation_id = self.session_conversation_map.get(session_id)
-
-        # 如果没有找到conversation_id，则创建新的对话
-        if not conversation_id:
-            conversation = coze.conversations.create(messages=[])
-            conversation_id = conversation.id
-            self.session_conversation_map[session_id] = conversation_id  # 更新映射
-
-        for event in coze.chat.stream(
-            bot_id=self.bot_id,
-            user_id=self.user_id,
-            additional_messages=[
-                Message.build_user_question_text(last_msg["content"]),
-            ],
-            conversation_id=conversation_id,
-        ):
-            if event.event == ChatEventType.CONVERSATION_MESSAGE_DELTA:
-                print(event.message.content, end="", flush=True)
-                yield event.message.content
+        yield from self._generate(session_id, dialogue, None)
 
     def response_with_functions(self, session_id, dialogue, functions=None):
-        if len(dialogue) == 2 and functions is not None and len(functions) > 0:
-            # 第一次调用llm， 取最后一条用户消息，附加tool提示词
-            last_msg = dialogue[-1]["content"]
-            function_str = json.dumps(functions, ensure_ascii=False)
-            modify_msg = get_system_prompt_for_function(function_str) + last_msg
-            dialogue[-1]["content"] = modify_msg
+        yield from self._generate(session_id, dialogue, self._build_tools(functions))
 
-        # 如果最后一个是 role="tool"，附加到user上
-        if len(dialogue) > 1 and dialogue[-1]["role"] == "tool":
-            assistant_msg = "\ntool call result: " + dialogue[-1]["content"] + "\n\n"
-            while len(dialogue) > 1:
-                if dialogue[-1]["role"] == "user":
-                    dialogue[-1]["content"] = assistant_msg + dialogue[-1]["content"]
-                    break
-                dialogue.pop()
+    def _generate(self, session_id, dialogue, tools):
+        chat = self.chats.get(session_id)
+        
+        # If no chat session exists, create a new one
+        if not chat:
+            role_map = {"assistant": "model", "user": "user"}
+            history: list[Content] = []
+            system_instruction = None
 
-        for token in self.response(session_id, dialogue):
-            yield token, None
+            if dialogue and dialogue[0].get("role") == "system":
+                system_instruction = dialogue[0].get("content")
+                system_instruction = emotional_prompt + system_instruction
+                dialogue = dialogue[1:]
+
+            model = GenerativeModel(self.model_name, system_instruction=system_instruction)
+            log.bind(tag=TAG).info(f"Creating new chat session for {session_id} with model {self.model_name} and system instruction: {system_instruction}")
+
+            for m in dialogue:
+                r = m["role"]
+                
+                if r == "assistant" and "tool_calls" in m:
+                    tc = m["tool_calls"][0]
+                    history.append(Content(role="model", parts=[Part.from_dict({
+                        'function_call': {
+                            'name': tc['function']['name'],
+                            'args': json.loads(tc['function']['arguments'])
+                        }
+                    })]))
+                    continue
+
+                if r == "tool":
+                    history.append(Content(role="function", parts=[Part.from_dict({
+                        'function_response': {
+                            'name': m['name'],
+                            'response': {'content': m['content']}
+                        }
+                    })]))
+                    continue
+
+                mapped_role = role_map.get(r)
+                if mapped_role:
+                    content_text = str(m.get("content", ""))
+                    if content_text:
+                        if history and history[-1].role == mapped_role:
+                            history[-1].parts.append(Part.from_text(content_text))
+                        else:
+                            history.append(Content(role=mapped_role, parts=[Part.from_text(content_text)]))
+
+            chat = model.start_chat(history=history)
+            self.chats[session_id] = chat
+
+        # The last message in the dialogue is the one to send
+        latest_message = dialogue[-1] if dialogue else None
+        
+        if not latest_message or not latest_message.get("content"):
+            # If there's no content to send, we can't proceed
+            return
+
+        log.bind(tag=TAG).info(f"Sending request to Vertex AI for session {session_id}")
+        try:
+            stream = chat.send_message(
+                content=latest_message["content"],
+                generation_config=self.gen_cfg,
+                tools=tools,
+                stream=True,
+            )
+            log.bind(tag=TAG).info("Successfully sent request to Vertex AI, streaming response.")
+        except Exception as e:
+            log.bind(tag=TAG).error(f"Error calling Vertex AI: {e}", exc_info=True)
+            raise
+
+        try:
+            for chunk in stream:
+                log.bind(tag=TAG).debug(f"Received chunk from Vertex AI: {chunk}")
+                if not chunk.candidates:
+                    continue
+                
+                part = chunk.candidates[0].content.parts[0]
+                # a) Function call - usually the last part is the function call
+                if part.function_call:
+                    fc = part.function_call
+                    yield None, [
+                        SimpleNamespace(
+                            id=uuid.uuid4().hex,
+                            type="function",
+                            function=SimpleNamespace(
+                                name=fc.name,
+                                arguments=json.dumps(
+                                    dict(fc.args), ensure_ascii=False
+                                ),
+                            ),
+                        )
+                    ]
+                    return
+                # b) Normal text
+                if part.text:
+                    yield part.text if tools is None else (part.text, None)
+        except Exception as e:
+            log.bind(tag=TAG).error(f"Error processing stream from Vertex AI: {e}", exc_info=True)
+        finally:
+            if tools is not None:
+                yield None, None  # function‑mode ends, returns dummy package

@@ -1,103 +1,61 @@
-import requests
-from config.logger import setup_logging
+'''google.py'''
+
+import logging
+import os
+from typing import Optional
+from google.cloud import texttospeech
 from core.providers.tts.base import TTSProviderBase
-from core.utils.util import parse_string_to_list
 
 TAG = __name__
-logger = setup_logging()
-
+logger = logging.getLogger(TAG)
 
 class TTSProvider(TTSProviderBase):
     def __init__(self, config, delete_audio_file):
         super().__init__(config, delete_audio_file)
-        self.url = config.get("url")
-        self.text_lang = config.get("text_lang", "zh")
-        self.ref_audio_path = config.get("ref_audio_path")
-        self.prompt_text = config.get("prompt_text")
-        self.prompt_lang = config.get("prompt_lang", "zh")
-
-        # 处理空字符串的情况
-        top_k = config.get("top_k", "5")
-        top_p = config.get("top_p", "1")
-        temperature = config.get("temperature", "1")
-        batch_threshold = config.get("batch_threshold", "0.75")
-        batch_size = config.get("batch_size", "1")
-        speed_factor = config.get("speed_factor", "1.0")
-        seed = config.get("seed", "-1")
-        repetition_penalty = config.get("repetition_penalty", "1.35")
-
-        self.top_k = int(top_k) if top_k else 5
-        self.top_p = float(top_p) if top_p else 1
-        self.temperature = float(temperature) if temperature else 1
-        self.batch_threshold = float(batch_threshold) if batch_threshold else 0.75
-        self.batch_size = int(batch_size) if batch_size else 1
-        self.speed_factor = float(speed_factor) if speed_factor else 1.0
-        self.seed = int(seed) if seed else -1
-        self.repetition_penalty = (
-            float(repetition_penalty) if repetition_penalty else 1.35
-        )
-
-        self.text_split_method = config.get("text_split_method", "cut0")
-
-        self.split_bucket = str(config.get("split_bucket", True)).lower() in (
-            "true",
-            "1",
-            "yes",
-        )
-        self.return_fragment = str(config.get("return_fragment", False)).lower() in (
-            "true",
-            "1",
-            "yes",
-        )
-
-        self.streaming_mode = str(config.get("streaming_mode", False)).lower() in (
-            "true",
-            "1",
-            "yes",
-        )
-
-        self.parallel_infer = str(config.get("parallel_infer", True)).lower() in (
-            "true",
-            "1",
-            "yes",
-        )
-
-        self.aux_ref_audio_paths = parse_string_to_list(
-            config.get("aux_ref_audio_paths")
-        )
-        self.audio_file_type = config.get("format", "wav")
+        self.client = texttospeech.TextToSpeechClient()
+        self.language_code = config.get("language_code", "cmn-CN")
+        self.voice_name = config.get("voice_name", "cmn-CN-Standard-B")
+        self.speaking_rate = config.get("speaking_rate", 1.0)
+        self.pitch = config.get("pitch", 0.0)
 
     async def text_to_speak(self, text, output_file):
-        request_json = {
-            "text": text,
-            "text_lang": self.text_lang,
-            "ref_audio_path": self.ref_audio_path,
-            "aux_ref_audio_paths": self.aux_ref_audio_paths,
-            "prompt_text": self.prompt_text,
-            "prompt_lang": self.prompt_lang,
-            "top_k": self.top_k,
-            "top_p": self.top_p,
-            "temperature": self.temperature,
-            "text_split_method": self.text_split_method,
-            "batch_size": self.batch_size,
-            "batch_threshold": self.batch_threshold,
-            "split_bucket": self.split_bucket,
-            "return_fragment": self.return_fragment,
-            "speed_factor": self.speed_factor,
-            "streaming_mode": self.streaming_mode,
-            "seed": self.seed,
-            "parallel_infer": self.parallel_infer,
-            "repetition_penalty": self.repetition_penalty,
-        }
-
-        resp = requests.post(self.url, json=request_json)
-        if resp.status_code == 200:
+        logger.info(f"[GoogleTTS] text_to_speak called with text: {text[:100]}... output_file: {output_file}")
+        try:
+            input_text = texttospeech.SynthesisInput(text=text)
+            voice = texttospeech.VoiceSelectionParams(
+                language_code=self.language_code,
+                name=self.voice_name
+            )
+            audio_config = texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+                speaking_rate=self.speaking_rate,
+                pitch=self.pitch
+            )
+            logger.info(f"[GoogleTTS] Requesting synthesis: lang={self.language_code}, voice={self.voice_name}, rate={self.speaking_rate}, pitch={self.pitch}")
+            response = self.client.synthesize_speech(
+                input=input_text,
+                voice=voice,
+                audio_config=audio_config
+            )
+            logger.info(f"[GoogleTTS] Synthesis response received. Audio size: {len(response.audio_content)} bytes")
             if output_file:
-                with open(output_file, "wb") as file:
-                    file.write(resp.content)
+                with open(output_file, "wb") as out:
+                    out.write(response.audio_content)
+                logger.info(f"[GoogleTTS] Audio content written to file {output_file}")
+                return output_file
             else:
-                return resp.content
-        else:
-            error_msg = f"GPT_SoVITS_V2 TTS请求失败: {resp.status_code} - {resp.text}"
-            logger.bind(tag=TAG).error(error_msg)
-            raise Exception(error_msg)
+                logger.info(f"[GoogleTTS] Returning audio bytes directly.")
+                return response.audio_content
+        except Exception as e:
+            logger.error(f"[GoogleTTS] Error in text_to_speak: {e}", exc_info=True)
+            raise
+
+    def set_voice(self, language_code, voice_name):
+        self.language_code = language_code
+        self.voice_name = voice_name
+
+    def set_speaking_rate(self, rate):
+        self.speaking_rate = rate
+
+    def set_pitch(self, pitch):
+        self.pitch = pitch
